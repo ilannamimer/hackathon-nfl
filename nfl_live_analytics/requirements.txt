@@ -1,0 +1,8 @@
+pandas>=2.0
+numpy>=1.24
+scipy>=1.10
+scikit-learn>=1.4
+plotly>=5.18
+streamlit>=1.50
+pyarrow>=14
+joblib>=1.3
