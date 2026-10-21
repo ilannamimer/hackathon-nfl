@@ -7,9 +7,6 @@ __pycache__/
 *.py[cod]
 .ipynb_checkpoints/
 
-# Données du dépôt officiel (~1 Go, à cloner séparément)
-nfl-big-data-bowl-regional-event-data/
-
 # Caches intermédiaires régénérables
 outputs/_*.parquet
 
