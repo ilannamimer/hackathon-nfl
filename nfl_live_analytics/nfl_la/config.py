@@ -25,8 +25,11 @@ def find_data_dir() -> Path | None:
 FIELD_LEN, FIELD_WID = 120.0, 53.3   # yards (end zones incluses)
 FPS = 10.0                           # fréquence du tracking (Hz)
 
-# Palette « broadcast »
-C_BG, C_PANEL = "#0B1220", "#121C30"
-C_OFF, C_DEF, C_BALL = "#2F9BFF", "#FF4D5E", "#FFC933"
-C_ACCENT, C_GOOD, C_WARN, C_TXT, C_MUTED = "#00E0B8", "#3DDC84", "#FFB020", "#EAF1FF", "#8CA0C3"
-C_TURF, C_TURF2 = "#1C5A3A", "#1F6542"
+# Palette « NFL.com » (thème clair)
+C_NAVY, C_RED = "#013369", "#D50A0A"
+C_BG, C_PANEL = "#FFFFFF", "#F2F4F7"
+C_OFF, C_DEF, C_BALL = "#013369", "#D50A0A", "#FFC933"
+C_ACCENT, C_GOOD, C_WARN, C_TXT, C_MUTED = "#D50A0A", "#1E9E5A", "#F2A900", "#111827", "#5B6770"
+C_TRAIL = "#FFD60A"
+C_TURF, C_TURF2 = "#2E7D4F", "#33875A"
+FONT = "Barlow, 'Barlow Condensed', Arial, sans-serif"

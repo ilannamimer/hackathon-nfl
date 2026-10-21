@@ -3,7 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from .config import (C_ACCENT, C_BALL, C_BG, C_DEF, C_MUTED, C_OFF, C_PANEL, C_TURF, C_TURF2, C_TXT, FIELD_WID, FPS)
+from . import teams
+from .config import (C_ACCENT, C_BALL, C_BG, C_DEF, C_MUTED, C_NAVY, C_OFF, C_PANEL, C_TRAIL, C_TURF, C_TURF2, C_TXT, FIELD_WID, FONT, FPS)
 from .data import vec
 
 EVENT_LABELS = {"ball_snap": "BALL SNAP", "autoevent_ballsnap": "BALL SNAP", "pass_forward": "PASS RELEASED",
@@ -15,10 +16,11 @@ EVENT_LABELS = {"ball_snap": "BALL SNAP", "autoevent_ballsnap": "BALL SNAP", "pa
 
 
 # ------------------------------------------------------------------ terrain statique
-def _field_layout(fig: go.Figure, x0: float, x1: float, los: float | None, first_down: float | None) -> None:
+def _field_layout(fig: go.Figure, x0: float, x1: float, los: float | None, first_down: float | None,
+                  off_abbr: str | None = None, def_abbr: str | None = None, off_color: str = C_OFF, def_color: str = C_DEF) -> None:
     shapes = [dict(type="rect", x0=0, x1=120, y0=0, y1=FIELD_WID, fillcolor=C_TURF, line=dict(width=0), layer="below"),
-              dict(type="rect", x0=0, x1=10, y0=0, y1=FIELD_WID, fillcolor="#173F55", line=dict(width=0), layer="below"),
-              dict(type="rect", x0=110, x1=120, y0=0, y1=FIELD_WID, fillcolor="#4A1F2C", line=dict(width=0), layer="below")]
+              dict(type="rect", x0=0, x1=10, y0=0, y1=FIELD_WID, fillcolor=off_color, line=dict(width=0), layer="below"),
+              dict(type="rect", x0=110, x1=120, y0=0, y1=FIELD_WID, fillcolor=def_color, line=dict(width=0), layer="below")]
     for k in range(10, 111, 10 if False else 5):               # bandes de turf alternées toutes les 5 yds
         if (k // 5) % 2 == 0 and k < 110:
             shapes.append(dict(type="rect", x0=k, x1=k + 5, y0=0, y1=FIELD_WID, fillcolor=C_TURF2,
@@ -39,9 +41,15 @@ def _field_layout(fig: go.Figure, x0: float, x1: float, los: float | None, first
     nx = [x for x in range(20, 101, 10) if x0 - 5 <= x <= x1 + 5]
     lab = [str(min(x - 10, 110 - x)) for x in nx]
     fig.add_trace(go.Scatter(x=nx * 2, y=[7] * len(nx) + [FIELD_WID - 7] * len(nx), text=lab * 2, mode="text",
-                             textfont=dict(color="rgba(255,255,255,.45)", size=26, family="Arial Black"),
+                             textfont=dict(color="rgba(255,255,255,.45)", size=26, family=FONT),
                              hoverinfo="skip", showlegend=False))
-    fig.update_layout(shapes=shapes)
+    images = []
+    for abbr, cx, sz, op in ((off_abbr, 5, 8.5, 0.95), (def_abbr, 115, 8.5, 0.95), (off_abbr, 60, 16, 0.22)):
+        u = teams.logo_url(abbr) if abbr else None
+        if u:
+            images.append(dict(source=u, xref="x", yref="y", x=cx, y=FIELD_WID / 2, sizex=sz, sizey=sz, xanchor="center",
+                               yanchor="middle", sizing="contain", opacity=op, layer="below"))
+    fig.update_layout(shapes=shapes, images=images)
 
 
 # ------------------------------------------------------------------ espace contrôlé
@@ -70,7 +78,7 @@ def space_share(g_frame: pd.DataFrame, off_team: str, los: float, depth: float =
 
 # ------------------------------------------------------------------ figure animée
 def play_figure(g: pd.DataFrame, meta: pd.DataFrame, off_team: str, los: float | None, yards_to_go: float | None,
-                sep_pair: tuple[float, float] | None = None, trail_ids: list[float] | None = None,
+                def_team: str | None = None, sep_pair: tuple[float, float] | None = None, trail_ids: list[float] | None = None,
                 show_vectors=True, show_space=False, start_frame: int | None = None, height=560) -> go.Figure:
     """g : tracking normalisé d'UNE action. meta : index nflId -> name, pos, jersey, role."""
     frames_ids = sorted(g.frameId.unique())
@@ -82,7 +90,9 @@ def play_figure(g: pd.DataFrame, meta: pd.DataFrame, off_team: str, los: float |
     x0, x1 = min(x0, (los or x0) - 12), max(x1, (los or x1) + 25)
     fd = (los + yards_to_go) if (los is not None and yards_to_go is not None) else None
     fig = go.Figure()
-    _field_layout(fig, x0, x1, los, fd)
+    off_c, def_c = teams.matchup_colors(off_team, def_team) if def_team else (C_OFF, C_DEF)
+    off_t, def_t = teams.text_on(off_c), teams.text_on(def_c)
+    _field_layout(fig, x0, x1, los, fd, off_team, def_team, off_c, def_c)
     trail_ids = trail_ids or []
 
     def trace_data(f):
@@ -130,21 +140,21 @@ def play_figure(g: pd.DataFrame, meta: pd.DataFrame, off_team: str, los: float |
         t = trace_data(f)
         return [
             go.Heatmap(x=t["heat"]["x"], y=t["heat"]["y"], z=t["heat"]["z"], zmin=-1, zmax=1, opacity=0.32 if show_space else 0,
-                       colorscale=[[0, C_DEF], [0.5, "rgba(0,0,0,0)"], [1, C_OFF]], showscale=False, hoverinfo="skip", zsmooth="best"),
-            go.Scatter(x=t["voff"]["x"], y=t["voff"]["y"], mode="lines", line=dict(color=C_OFF, width=2.5), hoverinfo="skip"),
-            go.Scatter(x=t["vdef"]["x"], y=t["vdef"]["y"], mode="lines", line=dict(color=C_DEF, width=2.5), hoverinfo="skip"),
-            go.Scatter(x=t["trail"]["x"], y=t["trail"]["y"], mode="lines", line=dict(color=C_ACCENT, width=3, dash="dot"), hoverinfo="skip"),
+                       colorscale=[[0, def_c], [0.5, "rgba(0,0,0,0)"], [1, off_c]], showscale=False, hoverinfo="skip", zsmooth="best"),
+            go.Scatter(x=t["voff"]["x"], y=t["voff"]["y"], mode="lines", line=dict(color="#FFFFFF", width=2.5), hoverinfo="skip"),
+            go.Scatter(x=t["vdef"]["x"], y=t["vdef"]["y"], mode="lines", line=dict(color="#FFE08A", width=2.5), hoverinfo="skip"),
+            go.Scatter(x=t["trail"]["x"], y=t["trail"]["y"], mode="lines", line=dict(color=C_TRAIL, width=3, dash="dot"), hoverinfo="skip"),
             go.Scatter(x=t["sep"]["x"], y=t["sep"]["y"], mode="lines", line=dict(color="#FFFFFF", width=2, dash="dash"), hoverinfo="skip"),
             go.Scatter(x=t["off"]["x"], y=t["off"]["y"], mode="markers+text", text=t["off"]["text"], hovertext=t["off"]["hovertext"],
-                       hoverinfo="text", textfont=dict(color="white", size=10),
-                       marker=dict(size=21, color=C_OFF, line=dict(color="white", width=1.5))),
+                       hoverinfo="text", textfont=dict(color=off_t, size=10, family=FONT),
+                       marker=dict(size=21, color=off_c, line=dict(color="white", width=1.5))),
             go.Scatter(x=t["def"]["x"], y=t["def"]["y"], mode="markers+text", text=t["def"]["text"], hovertext=t["def"]["hovertext"],
-                       hoverinfo="text", textfont=dict(color="white", size=10),
-                       marker=dict(size=21, color=C_DEF, line=dict(color="white", width=1.5))),
+                       hoverinfo="text", textfont=dict(color=def_t, size=10, family=FONT),
+                       marker=dict(size=21, color=def_c, line=dict(color="white", width=1.5))),
             go.Scatter(x=t["ball"]["x"], y=t["ball"]["y"], mode="markers", hoverinfo="skip",
                        marker=dict(size=12, color=C_BALL, symbol="diamond", line=dict(color="black", width=1.5))),
             go.Scatter(x=t["sepl"]["x"], y=t["sepl"]["y"], mode="text", text=t["sepl"].get("text", []),
-                       textfont=dict(color="white", size=15, family="Arial Black"), hoverinfo="skip"),
+                       textfont=dict(color="white", size=17, family=FONT), hoverinfo="skip"),
         ]
 
     start = start_frame if start_frame in frames_ids else frames_ids[0]
@@ -158,22 +168,22 @@ def play_figure(g: pd.DataFrame, meta: pd.DataFrame, off_team: str, los: float |
         frames.append(go.Frame(name=str(f), data=build(f), traces=idx, layout=go.Layout(annotations=[dict(
             x=0.5, y=1.0, xref="paper", yref="paper", yanchor="bottom", showarrow=False,
             text=f"<b>{label}</b>  ·  t = {(f - frames_ids[0]) / FPS:.1f}s" if label else f"t = {(f - frames_ids[0]) / FPS:.1f}s",
-            font=dict(color=C_ACCENT if label else C_MUTED, size=15))])))
+            font=dict(color=C_NAVY if label else C_MUTED, size=17, family=FONT))])))
     fig.frames = frames
     steps = [dict(method="animate", label=(str(round((f - frames_ids[0]) / FPS, 1)) if i % 5 == 0 else ""), args=[[str(f)],
              dict(mode="immediate", frame=dict(duration=0, redraw=True), transition=dict(duration=0))]) for i, f in enumerate(frames_ids)]
     fig.update_layout(
-        height=height, margin=dict(l=8, r=8, t=34, b=8), paper_bgcolor=C_BG, plot_bgcolor=C_TURF, font=dict(color=C_TXT),
+        height=height, margin=dict(l=8, r=8, t=34, b=8), paper_bgcolor=C_BG, plot_bgcolor=C_TURF, font=dict(color=C_TXT, family=FONT),
         xaxis=dict(range=[x0, x1], showgrid=False, zeroline=False, visible=False),
         yaxis=dict(range=[-1.5, FIELD_WID + 1.5], showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
         showlegend=False, hoverlabel=dict(bgcolor=C_PANEL, font_color=C_TXT),
         updatemenus=[dict(type="buttons", direction="left", x=0.0, y=-0.02, xanchor="left", yanchor="top", pad=dict(t=8), bgcolor=C_PANEL,
                           font=dict(color=C_TXT),
-                          buttons=[dict(label="▶ Lecture", method="animate", args=[None, dict(frame=dict(duration=int(1000 / FPS), redraw=True),
+                          buttons=[dict(label="Lecture", method="animate", args=[None, dict(frame=dict(duration=int(1000 / FPS), redraw=True),
                                         fromcurrent=True, transition=dict(duration=0))]),
-                                   dict(label="▶ Ralenti ×0.4", method="animate", args=[None, dict(frame=dict(duration=int(2500 / FPS), redraw=True),
+                                   dict(label="Ralenti ×0.4", method="animate", args=[None, dict(frame=dict(duration=int(2500 / FPS), redraw=True),
                                         fromcurrent=True, transition=dict(duration=0))]),
-                                   dict(label="⏸ Pause", method="animate", args=[[None], dict(mode="immediate", frame=dict(duration=0, redraw=False),
+                                   dict(label="Pause", method="animate", args=[[None], dict(mode="immediate", frame=dict(duration=0, redraw=False),
                                         transition=dict(duration=0))])])],
         sliders=[dict(active=frames_ids.index(start), steps=steps, x=0.28, len=0.7, y=-0.02, yanchor="top", pad=dict(t=8),
                       currentvalue=dict(prefix="t (s) : ", font=dict(color=C_MUTED)), font=dict(color=C_MUTED), bgcolor=C_PANEL,

@@ -10,14 +10,20 @@ import joblib
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.io as pio
 import streamlit as st
+import streamlit.components.v1 as components
 
-from nfl_la import broadcast as bc, data, field, metrics, models
-from nfl_la.config import (C_ACCENT, C_BALL, C_BG, C_DEF, C_GOOD, C_MUTED, C_OFF, C_PANEL, C_TXT, C_WARN, FPS, OUT_DIR,
+from nfl_la import broadcast as bc, data, field, metrics, models, teams, viewer3d
+from nfl_la.config import (FONT, C_NAVY, C_RED, C_TRAIL, C_ACCENT, C_BALL, C_BG, C_DEF, C_GOOD, C_MUTED, C_OFF, C_PANEL, C_TXT, C_WARN, FPS, OUT_DIR,
                            find_data_dir)
 
-st.set_page_config(page_title="NFL LIVE ANALYTICS", page_icon="🏈", layout="wide")
+st.set_page_config(page_title="NFL LIVE ANALYTICS", page_icon=teams.NFL_LOGO, layout="wide")
 st.markdown(bc.CSS, unsafe_allow_html=True)
+st.markdown(bc.top_bar(), unsafe_allow_html=True)
+# police Barlow par défaut dans tous les graphiques Plotly
+pio.templates["nfl"] = go.layout.Template(layout=dict(font=dict(family=FONT)))
+pio.templates.default = "plotly+nfl"
 
 # ============================================================== chargement (avec gestion d'erreurs)
 DD = find_data_dir()
@@ -56,10 +62,14 @@ except data.DataError as e:
 PLAYERS = T["players"].set_index("nflId")
 
 # ============================================================== barre latérale : sélection
-st.sidebar.markdown("## 🏈 NFL LIVE ANALYTICS")
-st.sidebar.caption("Replay analytique d'actions historiques · saison 2021 (S1-S8) · pas de données live")
+st.sidebar.markdown("### Sélection")
+st.sidebar.caption("Actions historiques · saison 2021 (S1-S8) · pas de données live")
 games = T["games"].sort_values("gameId")
 glabel = st.sidebar.selectbox("Match", games.gameId, format_func=lambda g: games.set_index("gameId").label[g])
+_g = games.set_index("gameId").loc[glabel]
+st.sidebar.markdown(f'<div style="display:flex;align-items:center;justify-content:center;gap:14px;margin:4px 0 10px 0">'
+                    f'{bc.logo_img(_g.visitorTeamAbbr, 44)}<span style="font:800 20px \'Barlow Condensed\';color:{C_NAVY}">@</span>'
+                    f'{bc.logo_img(_g.homeTeamAbbr, 44)}</div>', unsafe_allow_html=True)
 sub = PF[PF.gameId == glabel].sort_values("playId")
 only_att = st.sidebar.checkbox("Passes lancées seulement", True)
 if only_att:
@@ -95,15 +105,10 @@ rcv = st.sidebar.selectbox("Receveur analysé", routes, index=routes.index(defau
                            format_func=lambda i: f"{meta.name[i]} ({meta.pos[i]})") if routes else None
 if P.target_source:
     st.sidebar.caption(f"Receveur visé : **{meta.name.get(P.target_final, '?')}** (source : {P.target_source})")
-st.sidebar.markdown("---")
-show_vec = st.sidebar.toggle("Vecteurs de vitesse", True)
-show_space = st.sidebar.toggle("Contrôle de l'espace", False)
-show_trail = st.sidebar.toggle("Trajectoires (QB + receveur)", True)
 
 st.markdown(bc.header(P), unsafe_allow_html=True)
-st.caption(f"📝 {P.playDescription}")
-tabs = st.tabs(["📺 Broadcast", "🏟 Terrain animé", "🔍 Analyse de l'action", "🏃 Joueurs",
-                "🎯 Probability Center", "ℹ️ Méthodes & limites"])
+st.caption(P.playDescription)
+tabs = st.tabs(["Broadcast", "Terrain 3D", "Analyse de l'action", "Joueurs", "Probability Center", "Méthodes & limites"])
 
 # ============================================================== calculs communs
 def sep_for(rid):
@@ -128,14 +133,14 @@ with tabs[0]:
             st.markdown(bc.prob_card("EXPLOSIVE PASS", "Probabilité d'un gain ≥ 15 yards", P.p_explosive, "model",
                         "Même protocole. Résultat réel de l'action : "
                         f"<b>{int(P.prePenaltyPlayResult)} yds</b> · passe {'complétée' if P.complete else 'non complétée'}.",
-                        color=C_ACCENT), unsafe_allow_html=True)
+                        color=C_NAVY), unsafe_allow_html=True)
         else:
             st.info("Cette action n'est pas une passe lancée (sack / course du QB) : pas de probabilité de passe.")
         if P.down == 4:
             t4 = pd.DataFrame(REP["fourth_down"]["table"])
             st.markdown(bc.kv_card("4TH DOWN", f"4ème & {int(P.yardsToGo)} · {REP['fourth_down']['n']} dropbacks observés sur 4ème tentative", [
                 (f"{r.bucket} yds", f"{r.rate*100:.0f}%<span style='font-size:12px;color:{C_MUTED}'> (n={r.n})</span>") for r in t4.itertuples()],
-                "obs", "⚠️ Taux de conversion OBSERVÉS des passes uniquement. Punts, field goals et courses sont absents des données : "
+                "obs", "Attention : taux de conversion OBSERVÉS des passes uniquement. Punts, field goals et courses sont absents des données : "
                 "aucune recommandation de décision n'est possible.", color=C_WARN), unsafe_allow_html=True)
     with cB:
         if sep_tl is not None and rel is not None:
@@ -166,25 +171,24 @@ with tabs[0]:
             if f: fg.add_vline(x=(f - sep_tl.frameId.min()) / FPS, line_dash="dash", line_color=C_MUTED, annotation_text=lab, annotation_font_color=C_MUTED)
         fg.update_layout(title="Évolution de la séparation (yd)", height=280, paper_bgcolor=C_BG, plot_bgcolor=C_PANEL, font=dict(color=C_TXT),
                          margin=dict(l=10, r=10, t=40, b=10), xaxis_title="secondes", yaxis_title="yd")
-        f1.plotly_chart(fg, width="stretch")
+        f1.plotly_chart(fg, theme=None, width="stretch")
     if not press_tl.empty:
         fg = go.Figure(go.Scatter(x=(press_tl.frameId - press_tl.frameId.min()) / FPS, y=press_tl.pressure, mode="lines", line=dict(color=C_DEF, width=3),
                                   fill="tozeroy", fillcolor="rgba(255,77,94,.15)"))
         fg.update_layout(title="Pressure Index (0-100)", height=280, paper_bgcolor=C_BG, plot_bgcolor=C_PANEL, font=dict(color=C_TXT),
                          margin=dict(l=10, r=10, t=40, b=10), xaxis_title="secondes", yaxis=dict(range=[0, 100]))
-        f2.plotly_chart(fg, width="stretch")
+        f2.plotly_chart(fg, theme=None, width="stretch")
 
-# ============================================================== 2. TERRAIN ANIMÉ
+# ============================================================== 2. TERRAIN 3D
 with tabs[1]:
-    sep_pair = None
-    if rcv is not None and rel is not None and sep_tl is not None:
-        sep_pair = (rcv, sep_tl.loc[sep_tl.frameId == rel, "nearest_def"].iloc[0])
-    trails = [i for i in ([qb, rcv] if show_trail else []) if i is not None]
-    fig = field.play_figure(g, meta, P.possessionTeam, los, float(P.yardsToGo) if P.yardsToGo == P.yardsToGo else None,
-                            sep_pair=sep_pair, trail_ids=trails, show_vectors=show_vec, show_space=show_space, start_frame=rel or snap)
-    st.plotly_chart(fig, width="stretch", config=dict(displaylogo=False))
-    st.caption("🔵 attaque · 🔴 défense · ◆ ballon · ligne bleue = ligne de mêlée · ligne jaune = 1er down. Les vecteurs indiquent le déplacement "
-               "projeté à +0,8 s. Ligne pointillée blanche = receveur analysé ↔ défenseur le plus proche au lancer.")
+    html3d = viewer3d.build_html(g, meta, role, lined, PLAYERS, PI, P, rcv, qb, los,
+                                 float(P.yardsToGo) if P.yardsToGo == P.yardsToGo else None, snap, rel, height=760)
+    if hasattr(st, "iframe"):          # Streamlit récent ; components.html est déprécié
+        st.iframe(html3d, height=790)
+    else:
+        components.html(html3d, height=790, scrolling=False)
+    st.caption(f"Attaque : {teams.name(P.possessionTeam)} (end zone gauche) · défense : {teams.name(P.defensiveTeam)} (end zone droite). "
+               "Ligne bleue = mêlée, ligne jaune = 1er down, vecteurs = déplacement projeté à +0,8 s, losange = ballon.")
 
 # ============================================================== 3. ANALYSE
 with tabs[2]:
@@ -214,7 +218,7 @@ with tabs[2]:
             if share is not None:
                 st.markdown(bc.kv_card("OFFENSIVE SPACE", "Zone LOS → LOS+20 yds au lancer", [("Contrôlée par l'attaque", f"{share*100:.0f}%")], "calc",
                             "Chaque cellule va à l'équipe qui l'atteindrait en premier (positions projetées à +0,5 s)."), unsafe_allow_html=True)
-    st.subheader("⚑ Situations à surveiller (règles explicites)")
+    st.subheader("Situations à surveiller (règles explicites)")
     flags = []
     if P.get("time_to_throw") == P.get("time_to_throw") and P.time_to_throw >= 3.2: flags.append(f"Lancer tardif : {P.time_to_throw:.1f}s après le snap.")
     if P.get("pressure_at_release") == P.get("pressure_at_release") and P.pressure_at_release >= 60: flags.append(f"QB sous forte pression au lancer (index {P.pressure_at_release:.0f}).")
@@ -231,7 +235,6 @@ with tabs[2]:
 with tabs[3]:
     st.subheader("PLAYER EXPLOSIVENESS INDEX (indice maison — non officiel NFL)")
     E = REP["explosiveness"]
-    st.latex(r"EI = 100\times\big(0.40\,P_{vmax}+0.35\,P_{amax}+0.25\,P_{cuts}\big)")
     st.caption(f"P = rang percentile du joueur dans son groupe de postes (OL, DL, LB, DB, WR, TE, RB/FB, QB). Minimum {E['min_plays']} actions. "
                "vmax et amax = 90ᵉ percentile par action ; cuts = nombre moyen de changements de direction ≥ 45° en 0,3 s.")
     grp = st.multiselect("Groupes de postes", sorted(PI.group.unique()), default=["WR", "DB", "RB/FB"])
@@ -246,7 +249,7 @@ with tabs[3]:
                                           colorbar=dict(title="EI"), line=dict(color="white", width=.5))))
     fg.update_layout(title="Vitesse vs accélération (taille = changements de direction)", height=470, paper_bgcolor=C_BG, plot_bgcolor=C_PANEL,
                      font=dict(color=C_TXT), xaxis_title="V90 (yd/s)", yaxis_title="A90 (yd/s²)", margin=dict(l=10, r=10, t=40, b=10))
-    c2.plotly_chart(fg, width="stretch")
+    c2.plotly_chart(fg, theme=None, width="stretch")
     with st.expander("Justification des pondérations & robustesse"):
         st.markdown(f"""
 - **Vitesse (0,40)** : mesure la plus fiable (directement issue du tracking).
@@ -263,10 +266,10 @@ with tabs[4]:
     rows = []
     for k, lab in models.LABELS.items():
         for name, s in REP["models"][k]["scores"].items():
-            rows.append({"Cible": lab, "Modèle": {"logit": "Régression logistique", "hgb": "Gradient boosting"}[name] + (" ★" if name == REP["models"][k]["best"] else ""),
+            rows.append({"Cible": lab, "Modèle": {"logit": "Régression logistique", "hgb": "Gradient boosting"}[name] + (" (retenu)" if name == REP["models"][k]["best"] else ""),
                          "Brier": s["brier"], "Brier référence": s["brier_baseline"], "Skill": s["brier_skill"], "AUC": s["auc"], "ECE": s["ece"], "n": s["n"]})
     st.dataframe(pd.DataFrame(rows).round(3), hide_index=True, width="stretch")
-    st.caption("Brier : plus bas = mieux. Skill = 1 − Brier/Brier(taux moyen constant) ; > 0 = le modèle apporte de l'information. ECE = erreur de calibration moyenne. ★ = modèle retenu.")
+    st.caption("Brier : plus bas = mieux. Skill = 1 − Brier/Brier(taux moyen constant) ; > 0 = le modèle apporte de l'information. ECE = erreur de calibration moyenne. (retenu) = modèle retenu.")
     ab = REP["ablation_no_target"]
     st.caption(f"**Honnêteté sur la performance** : le receveur visé (identifié via le texte de l'action, connu au moment du lancer) apporte l'essentiel du signal. "
                f"Sans les variables de la cible, la complétion tombe à AUC {ab['p_complete']['auc']:.2f} (skill {ab['p_complete']['brier_skill']:.2f}) "
@@ -278,8 +281,8 @@ with tabs[4]:
                         go.Scatter(x=cal.predicted, y=cal.observed, mode="lines+markers", line=dict(color=C_ACCENT, width=3), name="modèle")])
         fg.update_layout(title=f"Calibration — {lab}", height=330, paper_bgcolor=C_BG, plot_bgcolor=C_PANEL, font=dict(color=C_TXT),
                          xaxis_title="probabilité prédite", yaxis_title="fréquence observée", margin=dict(l=10, r=10, t=40, b=10), showlegend=False)
-        col.plotly_chart(fg, width="stretch")
-    st.subheader("🧪 Simulateur « what-if » (scénario fictif — pas une action réelle)")
+        col.plotly_chart(fg, theme=None, width="stretch")
+    st.subheader("Simulateur « what-if » (scénario fictif — pas une action réelle)")
     med = MOD["medians"]; s1, s2, s3, s4 = st.columns(4)
     v = {"time_to_throw": s1.slider("Temps de lancer (s)", 1.0, 5.0, float(round(med["time_to_throw"], 1)), .1),
          "target_sep": s2.slider("Séparation du receveur (yd)", 0.0, 10.0, float(round(med["target_sep"], 1)), .1),
@@ -294,7 +297,7 @@ with tabs[4]:
         Xm, _ = models.build_matrix(X1, MOD["models"][k]["cats"]); out[k] = float(MOD["models"][k]["model"].predict_proba(Xm)[0, 1])
     w1, w2 = st.columns(2)
     w1.markdown(bc.prob_card("PASS COMPLETION", "Scénario fictif", out["p_complete"], "model", "Autres variables = médiane du jeu de données."), unsafe_allow_html=True)
-    w2.markdown(bc.prob_card("EXPLOSIVE PASS", "Scénario fictif", out["p_explosive"], "model", "Modèle final entraîné sur toutes les actions (usage illustratif).", color=C_ACCENT), unsafe_allow_html=True)
+    w2.markdown(bc.prob_card("EXPLOSIVE PASS", "Scénario fictif", out["p_explosive"], "model", "Modèle final entraîné sur toutes les actions (usage illustratif).", color=C_NAVY), unsafe_allow_html=True)
     st.subheader("Probabilités NON calculables avec ces données")
     st.markdown("""
 | Probabilité demandée | Pourquoi elle n'est pas calculée | Solution réaliste |
